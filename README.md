@@ -601,5 +601,3 @@ All three project services can start independently. If Supabase is down,
 sensor rows queue locally and images are captured locally; uploads resume
 when connectivity returns (sensor rows automatically, images on the next
 successful capture or via `upload_images.py`).
-#   s p i c e _ u p _ p a r a m  
- 
