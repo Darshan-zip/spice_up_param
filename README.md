@@ -51,6 +51,8 @@ duplicates.
 | `capture_and_upload.py` | Captures a normal photo and a thermal frame every 30 s, uploads both |
 | `upload_images.py` | Backfill utility for existing local capture images |
 | `thermal_test.py` | Standalone MLX90640 test |
+| `esp32/spice_sensor_node/spice_sensor_node.ino` | ESP32 sketch: reads sensors and publishes MQTT JSON |
+| `esp32/spice_sensor_node/secrets.example.h` | Template for Wi-Fi and MQTT credentials; copy to `secrets.h` |
 | `sql/postgres_schema.sql` | Local PostgreSQL table, migration, and index |
 | `sql/supabase_schema.sql` | Supabase table |
 | `mosquitto/spice.conf` | Mosquitto listener/auth configuration |
@@ -66,7 +68,7 @@ duplicates.
 - Raspberry Pi running Raspberry Pi OS Bookworm (64-bit recommended)
 - MLX90640 thermal camera on I2C (default address `0x33`)
 - Raspberry Pi camera module supported by `rpicam-still`
-- ESP32 or another MQTT publisher for the sensor JSON
+- ESP32 sensor node with BME280, MQ135, CJMCU VOC, and TCS34725 sensors
 - A Supabase project
 - Python 3.11 or newer
 
@@ -96,7 +98,101 @@ The capture script also falls back to `libcamera-still` when available.
 
 ---
 
-## 4. Install system packages
+## 4. Program the ESP32 sensor node
+
+The sketch is in `esp32/spice_sensor_node/`. It reads the sensors, computes
+the derived indexes, and publishes a JSON message to
+`spice/sensor/data` every 10 seconds.
+
+### Wiring
+
+| Device | ESP32 connection | Address / signal |
+| --- | --- | --- |
+| BME280 | I2C: SDA GPIO 21, SCL GPIO 22 | `0x77`, fallback `0x76` |
+| TCS34725 | I2C: SDA GPIO 21, SCL GPIO 22 | `0x29` |
+| MQ135 | GPIO 32 | analog input |
+| CJMCU VOC | GPIO 33 | analog input |
+
+The ESP32 ADC accepts 0 to 3.3 V. If an analog sensor module can output
+more than 3.3 V, use a voltage divider before connecting it to the ESP32.
+
+### Install the Arduino libraries
+
+In Arduino IDE, open **Library Manager** and install:
+
+- **PubSubClient** by Nick O'Leary
+- **ArduinoJson 6.x** (the sketch uses `StaticJsonDocument`)
+- **Adafruit Unified Sensor**
+- **Adafruit BME280 Library**
+- **Adafruit TCS34725**
+- **MQ135** by GeorgK
+
+Install ESP32 board support through **Boards Manager**. If the ESP32
+package is not listed, add this URL in **Preferences -> Additional Boards
+Manager URLs**:
+
+```text
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
+```
+
+Then install **esp32 by Espressif Systems**.
+
+### Configure Wi-Fi and MQTT
+
+The sketch reads credentials from `secrets.h`, which is excluded from git.
+Create it from the template:
+
+```bash
+cd esp32/spice_sensor_node
+cp secrets.example.h secrets.h
+```
+
+Edit `secrets.h`:
+
+```cpp
+#define WIFI_SSID "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+
+#define MQTT_SERVER "192.168.1.50"   // Raspberry Pi LAN IP
+#define MQTT_PORT 1883
+
+#define MQTT_USER "spice_mqtt_user"
+#define MQTT_PASSWORD "YOUR_ESP32_MQTT_PASSWORD"
+#define MQTT_TOPIC "spice/sensor/data"
+```
+
+Use the Raspberry Pi's LAN IP address. `127.0.0.1` would point the ESP32
+at itself, not at the Pi. The ESP32 and the Pi must be on the same network,
+and the Pi firewall must allow TCP port 1883.
+
+`MQTT_USER` and `MQTT_PASSWORD` are the `spice_mqtt_user` credentials
+created in the Mosquitto section. Do not use the receiver password here.
+
+### Upload the sketch
+
+1. Select **Tools -> Board -> ESP32 Arduino -> ESP32 Dev Module**.
+2. Select the correct serial port.
+3. Open `spice_sensor_node.ino`.
+4. Click **Upload**.
+5. Open the Serial Monitor at **115200 baud**.
+
+Expected startup output includes the Wi-Fi IP address, sensor
+initialization results, and then `SUCCESS: MQTT message published.` every
+10 seconds.
+
+If MQTT fails:
+
+- State `4` or `5`: wrong MQTT username/password or ACL.
+- State `-2`: broker unreachable; verify `MQTT_SERVER` and port 1883.
+- State `-1`: connection timeout; check that the Pi is reachable.
+- Wi-Fi failure: verify SSID, password, and 2.4 GHz network availability.
+
+Once the ESP32 is publishing, the Raspberry Pi `receiver.py` will store
+each message in PostgreSQL and sync it to Supabase.
+
+---
+
+## 5. Install system packages
 
 ```bash
 sudo apt update
@@ -116,7 +212,7 @@ add OpenCV-based processing later.
 
 ---
 
-## 5. Create the Python environment
+## 6. Create the Python environment
 
 Copy the project files to the Pi, for example to `~/spice_monitor`:
 
@@ -143,7 +239,7 @@ python -c "import board, busio, adafruit_mlx90640; print('Blinka OK')"
 
 ---
 
-## 6. Configure `.env`
+## 7. Configure `.env`
 
 ```bash
 cp .env.example .env
@@ -164,7 +260,7 @@ browser or mobile app, and never commit `.env`.
 
 ---
 
-## 7. Set up local PostgreSQL
+## 8. Set up local PostgreSQL
 
 ```bash
 sudo systemctl enable --now postgresql
@@ -200,7 +296,7 @@ psql -h 127.0.0.1 -U spice_app -d spice_db -c "\d sensor_readings"
 
 ---
 
-## 8. Set up Mosquitto
+## 9. Set up Mosquitto
 
 ```bash
 sudo systemctl enable --now mosquitto
@@ -264,7 +360,7 @@ file permissions, the ACL, and `allow_anonymous false`.
 
 ---
 
-## 9. Set up Supabase
+## 10. Set up Supabase
 
 1. Create a Supabase project.
 2. Open **SQL Editor** and run `sql/supabase_schema.sql`.
@@ -282,7 +378,7 @@ which lets the upsert update an existing row instead of creating a new one.
 
 ---
 
-## 10. Test the cameras
+## 11. Test the cameras
 
 Activate the environment first:
 
@@ -314,7 +410,7 @@ Supabase upload confirmations.
 
 ---
 
-## 11. Run the data pipeline manually
+## 12. Run the data pipeline manually
 
 Use three terminals, all with the virtual environment activated.
 
@@ -383,7 +479,7 @@ Verify in Supabase:
 
 ---
 
-## 12. Run as systemd services
+## 13. Run as systemd services
 
 The files in `systemd/` assume:
 
@@ -432,7 +528,7 @@ sudo reboot
 
 ---
 
-## 13. Sensor payload format
+## 14. Sensor payload format
 
 The receiver accepts any JSON object and inserts known keys. Unknown keys
 are preserved in `raw_payload` but are not stored in dedicated columns.
@@ -469,7 +565,7 @@ Publish topic: `spice/sensor/data`.
 
 ---
 
-## 14. Backfill old images
+## 15. Backfill old images
 
 `upload_images.py` uploads every image in `thermal_captures/` to the
 configured bucket under the `thermal/` prefix. Use it after an outage or
@@ -485,7 +581,7 @@ uploaded files will be reported as failed. This is harmless.
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 **`board` or `busio` import fails**
 
@@ -572,7 +668,7 @@ the timestamp.
 
 ---
 
-## 16. Security notes
+## 17. Security notes
 
 - Change every example password. Do not reuse the MQTT and database
   passwords.
@@ -589,7 +685,7 @@ the timestamp.
 
 ---
 
-## 17. Startup order summary
+## 18. Startup order summary
 
 1. `mosquitto`
 2. `postgresql`
