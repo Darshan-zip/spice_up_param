@@ -1,0 +1,21 @@
+[Unit]
+Description=Spice Monitor Supabase Synchronization
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=pi
+Group=pi
+
+WorkingDirectory=/home/pi/spice_monitor
+EnvironmentFile=/home/pi/spice_monitor/.env
+
+ExecStart=/home/pi/spice_monitor/.venv/bin/python /home/pi/spice_monitor/supabase_sync.py
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

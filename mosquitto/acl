@@ -1,0 +1,7 @@
+# Copy this file to /etc/mosquitto/acl
+
+user spice_mqtt_user
+topic write spice/sensor/data
+
+user spice_db_receiver
+topic read spice/sensor/data

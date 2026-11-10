@@ -1,0 +1,23 @@
+[Unit]
+Description=Spice Monitor Normal and Thermal Camera Capture
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=pi
+Group=pi
+SupplementaryGroups=video
+
+WorkingDirectory=/home/pi/spice_monitor
+EnvironmentFile=/home/pi/spice_monitor/.env
+Environment=MPLBACKEND=Agg
+
+ExecStart=/home/pi/spice_monitor/.venv/bin/python /home/pi/spice_monitor/capture_and_upload.py
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

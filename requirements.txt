@@ -1,0 +1,8 @@
+adafruit-blinka
+adafruit-circuitpython-mlx90640
+matplotlib
+numpy
+paho-mqtt
+psycopg[binary]
+python-dotenv
+supabase
